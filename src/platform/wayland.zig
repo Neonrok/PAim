@@ -1,12 +1,6 @@
 const std = @import("std");
 
-const c = @cImport({
-    @cInclude("wayland-client.h");
-    @cInclude("wlr-layer-shell-client-protocol.h");
-    @cInclude("xdg-shell-client-protocol.h");
-    @cInclude("unistd.h");
-    @cInclude("sys/mman.h");
-});
+const c = @import("c");
 
 fn registryGlobal(
     data: ?*anyopaque,

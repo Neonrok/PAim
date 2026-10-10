@@ -1,8 +1,18 @@
 const std = @import("std");
 
+const Translator = @import("translate_c").Translator;
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const tc = b.dependency("translate_c", .{});
+    const tr:Translator = .init(tc, .{
+        .c_source_file = b.path("src/c.h"),
+        .target = target,
+        .optimize = optimize,
+        .link_system_libs = &.{.{.name="wayland-client"}}
+    });
 
     const exe = b.addExecutable(.{
         .name = "PAIM",
@@ -10,6 +20,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .imports=&.{.{
+                .name="c",.module=tr.mod
+            }},
         }),
     });
 
@@ -37,6 +50,8 @@ pub fn build(b: *std.Build) void {
         }
     });
 
+    exe.root_module.link_libc=true;
+
     b.installArtifact(exe);
 
     const run_step = b.step("run", "Run the app");
@@ -44,7 +59,5 @@ pub fn build(b: *std.Build) void {
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
 
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 }
