@@ -1,5 +1,5 @@
 const std = @import("std");
-
+const App = @import("../core/app.zig").App;
 const c = @import("c");
 
 fn registryGlobal(
@@ -139,7 +139,9 @@ pub const Wayland = struct {
     configured_width: u32 = 0,
     configured_heigth: u32 = 0,
 
-    pub fn connect() !Wayland {
+    app: *const App,
+
+    pub fn connect(app: *const App) !Wayland {
         const display = c.wl_display_connect(null) orelse
             return error.WaylandConnectionFailed;
 
@@ -151,6 +153,7 @@ pub const Wayland = struct {
         return .{
             .display = display,
             .registry = registry,
+            .app = app,
         };
     }
 

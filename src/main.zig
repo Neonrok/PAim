@@ -5,12 +5,10 @@ const App = @import("core/app.zig").App;
 pub fn main() !void {
     const app = App{};
 
-    var wayland = try Wayland.connect();
+    var wayland = try Wayland.connect(&app);
     defer wayland.disconnect();
 
     try wayland.discoverGlobals();
     try wayland.createOverlaySurface();
     try wayland.dispatch();
-
-    _ = app;
 }
