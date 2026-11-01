@@ -1,19 +1,17 @@
-const PanelState = @import("../ui/panel.zig").PaneState;
-const PanelAction = @import("../ui/panel.zig").PaneAction;
+const PanelState = @import("../ui/panel.zig").PanelState;
+const PanelAction = @import("../ui/panel.zig").PanelAction;
 
 pub const App = struct {
     panel: PanelState = .{},
 
-    pub fn handleAction(self: *App, action: PanelState) bool {
+    /// Devolve true se a aplicação deve fechar.
+    pub fn handleAction(self: *App, action: PanelAction) bool {
         switch (action) {
-            .toggle_crosshair_enabled => {
+            .toggle_crosshair => {
                 self.panel.crosshair_enabled = !self.panel.crosshair_enabled;
                 return false;
             },
-
-            .quit => {
-                return true;
-            },
+            .quit => return true,
         }
     }
 };

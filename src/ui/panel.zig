@@ -1,8 +1,8 @@
-pub const PaneState = struct {
+pub const PanelState = struct {
     crosshair_enabled: bool = true,
 };
 
-pub const PaneAction = enum {
+pub const PanelAction = enum {
     toggle_crosshair,
     quit,
 };

@@ -1,6 +1,7 @@
 const std = @import("std");
 const App = @import("../core/app.zig").App;
 const c = @import("c");
+const Panel = @import("../ui/wayland_panel.zig").Panel;
 
 fn registryGlobal(
     data: ?*anyopaque,
@@ -139,9 +140,12 @@ pub const Wayland = struct {
     configured_width: u32 = 0,
     configured_heigth: u32 = 0,
 
-    app: *const App,
+    overlay_visible: bool = false,
+    panel: Panel = .{},
 
-    pub fn connect(app: *const App) !Wayland {
+    app: *App,
+
+    pub fn connect(app: *App) !Wayland {
         const display = c.wl_display_connect(null) orelse
             return error.WaylandConnectionFailed;
 
@@ -252,7 +256,17 @@ pub const Wayland = struct {
         c.wl_surface_commit(surface);
     }
 
-    pub fn drawPixel(self: *Wayland) !void {
+    pub fn createPanel(self: *Wayland) !void {
+        try self.panel.setup(
+            self.app,
+            self.compositor orelse return error.WlCompositorNotFound,
+            self.shm orelse return error.WlShmNotFound,
+            self.xdg_wm_base orelse return error.XdgWmBaseNotFound,
+            self.seat orelse return error.WlSeatNotFound,
+        );
+    }
+
+    pub fn createOverlayBuffer(self: *Wayland) !void {
         const width = self.configured_width;
         const heigth = self.configured_heigth;
 
@@ -266,100 +280,57 @@ pub const Wayland = struct {
 
         if (c.ftruncate(fd, @intCast(size)) != 0) return error.TruncateFailed;
 
-        const mapped = c.mmap(
-            null, 
-            size, 
-            c.PROT_READ | c.PROT_WRITE,
-            c.MAP_SHARED, fd, 0,
-        );
-
+        const mapped = c.mmap(null, size, c.PROT_READ | c.PROT_WRITE, c.MAP_SHARED, fd, 0);
         if (mapped == c.MAP_FAILED) return error.MmapFailed;
-
+        
         const data: []u8 = @as([*]u8, @ptrCast(mapped))[0..size];
-
         self.shm_data = data;
-
         @memset(data, 0);
 
-        const center_x = width / 2;
-        const center_y = heigth / 2;
-
-        const offset = center_y * stride + center_x * 4;
-
+        const offset = (heigth / 2) * stride + (width / 2) * 4;
         data[offset + 0] = 0xFF;
         data[offset + 1] = 0x00;
         data[offset + 2] = 0xFF;
         data[offset + 3] = 0xFF;
 
-        const shm = self.shm orelse
-            return error.WlShmNotFound;
-
-        const surface = self.surface orelse return error.SurfaceCreationFiled;
-
-        const pool = c.wl_shm_create_pool(
-            shm, 
-            fd, 
-            @intCast(size)
-        );
-
-        if (pool == null) return error.ShmPoolCreationFailed;
+        const shm = self.shm orelse return error.WlShmNotFound;
+        const pool = c.wl_shm_create_pool(shm, fd, @intCast(size)) orelse return error.ShmPoolCreationFailed;
+        defer c.wl_shm_pool_destroy(pool);
 
         self.buffer = c.wl_shm_pool_create_buffer(
-            pool, 
-            0,
-            @intCast(width),
-            @intCast(heigth),
-            @intCast(stride),
+            pool, 0, @intCast(width), @intCast(heigth), @intCast(stride),
             c.WL_SHM_FORMAT_ARGB8888,
         );
-
-        std.debug.print("Buffer a ser criado: {}x{}\n", .{
-            width,
-            heigth,
-        });
-
-        c.wl_shm_pool_destroy(pool);
-
-        if (self.buffer == null) return error.SurfaceCreationFiled;
-
-        c.wl_surface_attach(
-            surface, 
-            self.buffer,
-            0,
-            0,
-        );
-
-        c.wl_surface_damage(
-            surface, 
-            0, 
-            0, 
-            @intCast(width), 
-            @intCast(heigth)
-        );
-
-        std.debug.print(
-            "A fazer commit do pixel em ({}, {})\n",
-            .{
-                center_x,
-                center_y,
-            },
-        );
-
-        c.wl_surface_commit(surface);
+        if (self.buffer == null) return error.BufferCreationFailed;
     }
-    
-    pub fn dispatch(self: *Wayland) !void {
-        if (!self.configured) {
-            if (c.wl_display_dispatch(self.display) < 0) return error.WaylandDispatchFailed;
-        }
 
-        std.debug.print("Dispatch terminou. Configured = {}\n", .{self.configured});
-        if(self.configured)try self.drawPixel();
-
-        while (true) {
-            if (c.wl_display_dispatch(self.display) == -1) {
-                return error.WaylandDispatchFailed;
+    pub fn syncOverlay(self: *Wayland) void {
+        if (!self.configured) return;
+        const surface = self.surface orelse return;
+        
+        if (self.app.panel.crosshair_enabled) {
+            if (self.overlay_visible) return;
+            if (self.buffer == null) {
+                self.createOverlayBuffer() catch |err| {
+                    std.debug.print("error ao criar buffer do overlay: {}\n", .{err});
+                    return;
+                };
             }
+            c.wl_surface_attach(surface, self.buffer, 0, 0);
+            c.wl_surface_damage(surface, 0, 0, @intCast(self.configured_width), @intCast(self.configured_heigth));
+            c.wl_surface_commit(surface);
+            self.overlay_visible = true;
+        } else {
+            c.wl_surface_attach(surface, null, 0, 0);
+            c.wl_surface_commit(surface);
+            self.overlay_visible = false;
+        }
+    }
+        
+    pub fn dispatch(self: *Wayland) !void {
+        while (!self.panel.should_quit) {
+            if (c.wl_display_dispatch(self.display) == -1) return error.WaylandDispatchFailed;
+            self.syncOverlay();
         }
     }
 };
