@@ -3,8 +3,8 @@ const c = @import("c");
 const App = @import("../core/app.zig").App;
 const PanelAction = @import("panel.zig").PanelAction;
 
-const WIN_W: usize = 280;
-const WIN_H: usize = 140;
+const WIN_W: usize = 600;
+const WIN_H: usize = 400;
 
 const Rect = struct {
     x: i32,
@@ -22,7 +22,16 @@ const Rect = struct {
 
 const switch_rect = Rect{ .x = 190, .y = 30, .w = 60, .h = 30 };
 
-const quit_rect = Rect{ .x = 30, .y = 85, .w = 220, .h = 36 };
+const QUIT_H: i32 = 36;
+const QUIT_W: i32 = QUIT_H;
+
+// canto superior direito, a 1 px da borda
+const quit_rect = Rect{
+    .x = @as(i32, WIN_W) - QUIT_W - 1,
+    .y = 1,
+    .w = QUIT_W,
+    .h = QUIT_H,
+};
 
 const BTN_LEFT: u32 = 0x110;
 
@@ -58,11 +67,23 @@ fn fixed(v: i32) f64 {
     return @as(f64, @floatFromInt(v)) / 256.0;
 }
 
-fn pointerEnter(data: ?*anyopaque, _: ?*c.wl_pointer, _: u32, surface: ?*c.wl_surface, sx: i32, sy: i32) callconv(.c) void {
+fn pointerEnter(data: ?*anyopaque, pointer: ?*c.wl_pointer, serial: u32, surface: ?*c.wl_surface, sx: i32, sy: i32) callconv(.c) void {
     const self: *Panel = @ptrCast(@alignCast(data.?));
     self.on_panel = (surface == self.surface);
     self.pointer_x = fixed(sx);
     self.pointer_y = fixed(sy);
+
+    if (self.on_panel) {
+        if (self.cursor_image) |img| {
+            c.wl_pointer_set_cursor(
+                pointer,
+                serial,
+                self.cursor_surface,
+                @intCast(img.hotspot_x),
+                @intCast(img.hotspot_y),
+            );
+        }
+    }
 }
 
 fn pointerLeave(data: ?*anyopaque, _: ?*c.wl_pointer, _: u32, _: ?*c.wl_surface) callconv(.c) void {
@@ -134,7 +155,12 @@ pub const Panel = struct {
     toplevel: ?*c.xdg_toplevel = null,
     pointer: ?*c.wl_pointer = null,
     buffer: ?*c.wl_buffer = null,
+
     pixels: []u32 = &.{},
+
+    cursor_theme: ?*c.wl_cursor_theme = null,
+    cursor_surface: ?*c.wl_surface = null,
+    cursor_image: ?*c.wl_cursor_image = null,
 
     pointer_x: f64 = 0,
     pointer_y: f64 = 0,
@@ -153,6 +179,7 @@ pub const Panel = struct {
         self.app = app;
 
         try self.createBuffer(shm);
+        try self.setupCursor(compositor, shm);
 
         _ = c.xdg_wm_base_add_listener(wm_base, &wm_base_listener, self);
         _ = c.wl_seat_add_listener(seat, &seat_listener, self);
@@ -175,6 +202,25 @@ pub const Panel = struct {
 
         // commit inicial sem buffer; o buffer só é anexado após o primeiro configure
         c.wl_surface_commit(self.surface);
+    }
+
+    fn setupCursor(self: *Panel, compositor: *c.wl_compositor, shm: *c.wl_shm) !void {
+        self.cursor_theme = c.wl_cursor_theme_load(null, 24, shm) orelse
+            return error.CursorThemeFailed;
+
+        const cursor = c.wl_cursor_theme_get_cursor(self.cursor_theme, "left_ptr") orelse
+            return error.CursorNotFound;
+
+        const image = cursor.*.images[0];
+        self.cursor_image = image;
+
+        self.cursor_surface = c.wl_compositor_create_surface(compositor) orelse
+            return error.CursorSurfaceFailed;
+
+        const buf = c.wl_cursor_image_get_buffer(image);
+        c.wl_surface_attach(self.cursor_surface, buf, 0, 0);
+        c.wl_surface_damage(self.cursor_surface, 0, 0, @intCast(image.*.width), @intCast(image.*.height));
+        c.wl_surface_commit(self.cursor_surface);
     }
 
     fn createBuffer(self: *Panel, shm: *c.wl_shm) !void {

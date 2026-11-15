@@ -41,6 +41,9 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    //wayland cursor
+    exe.root_module.linkSystemLibrary("wayland-cursor", .{});
+
     //xdg-shell-protocol-c
     exe.root_module.addCSourceFile(.{
         .file = b.path("src/protocols/xdg-shell-protocol.c"),
